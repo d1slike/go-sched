@@ -11,7 +11,14 @@ type Scheduler interface {
 	Start()
 	Shutdown() error
 	RegisterExecutor(jType string, executor JobExecutor)
-	ScheduleJob(job MutableJob, trigger MutableTrigger)
+	UnregisterExecutor(jType string) bool
+	ScheduleJob(job MutableJob, trigger MutableTrigger) error
+	GetJob(jKey string) (ImmutableJob, bool)
+	GetTrigger(tKey string) (ImmutableTrigger, bool)
+	DeleteJob(jKey string) bool
+	DeleteTrigger(tKey string) bool
+	GetJobs() []ImmutableJob
+	GetTriggers() []ImmutableTrigger
 }
 
 type scheduler struct {
@@ -28,8 +35,9 @@ func (s *scheduler) Shutdown() error {
 
 }
 
-func (s *scheduler) RegisterExecutor(jType string, executor JobExecutor) {
+func (s *scheduler) RegisterExecutor(jType string, executor JobExecutor) Scheduler {
 	s.registry.Register(jType, executor)
+	return s
 }
 
 func (s *scheduler) ScheduleJob(job MutableJob, tri MutableTrigger) error {
@@ -48,6 +56,14 @@ func (s *scheduler) ScheduleJob(job MutableJob, tri MutableTrigger) error {
 		return errors.New("unknown trigger type")
 	}
 	trigger.jobKey = j.Key()
+
+	if err := s.store.InsertJob(j); err != nil {
+		return err
+	}
+
+	if err := s.store.InsertTrigger(trigger); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -72,5 +88,11 @@ func NewScheduler(name string, opts ...Option) Scheduler {
 func WithStore(store Store) Option {
 	return func(s *scheduler) {
 		s.store = store
+	}
+}
+
+func WithExecutors(m map[string]JobExecutor) Option {
+	return func(s *scheduler) {
+		s.registry.RegisterAll(m)
 	}
 }

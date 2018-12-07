@@ -33,6 +33,7 @@ type MutableTrigger interface {
 type ImmutableTrigger interface {
 	Key() string
 	JobKey() string
+	Scheduler() string
 	FromTime() *time.Time
 	ToTime() *time.Time
 	Repeats() Repeats
@@ -42,17 +43,22 @@ type ImmutableTrigger interface {
 }
 
 type trigger struct {
-	key      string
-	jobKey   string
-	fromTime *time.Time
-	toTime   *time.Time
-	repeats  Repeats
-	cronSpec string
-	location string
+	key       string
+	jobKey    string
+	scheduler string
+	fromTime  *time.Time
+	toTime    *time.Time
+	repeats   Repeats
+	cronSpec  string
+	location  string
 
 	loc      *time.Location
 	sched    cron.Schedule
 	nextTime time.Time
+}
+
+func (t *trigger) Scheduler() string {
+	return t.scheduler
 }
 
 func (t *trigger) JobKey() string {

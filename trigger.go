@@ -1,12 +1,24 @@
 package scheduler
 
-import "time"
-
-type Repeats int
+import (
+	"errors"
+	"fmt"
+	"github.com/robfig/cron"
+	"time"
+)
 
 const (
 	Infinity = Repeats(-1)
 )
+
+var (
+	ErrEmptyTriggerKey = errors.New("empty trigger key")
+	ErrEmptyCronSpec   = errors.New("empty cron specification")
+	ErrInvalidLocation = "invalid location: %v"
+	ErrInvalidCronSpec = "invalid cron spec: %v"
+)
+
+type Repeats int
 
 type MutableTrigger interface {
 	WithKey(tKey string) MutableTrigger
@@ -20,6 +32,7 @@ type MutableTrigger interface {
 
 type ImmutableTrigger interface {
 	Key() string
+	JobKey() string
 	FromTime() *time.Time
 	ToTime() *time.Time
 	Repeats() Repeats
@@ -30,6 +43,7 @@ type ImmutableTrigger interface {
 
 type trigger struct {
 	key      string
+	jobKey   string
 	fromTime *time.Time
 	toTime   *time.Time
 	repeats  Repeats
@@ -37,34 +51,66 @@ type trigger struct {
 	location string
 
 	loc      *time.Location
+	sched    cron.Schedule
 	nextTime time.Time
 }
 
+func (t *trigger) JobKey() string {
+	return t.key
+}
+
 func (t *trigger) WithKey(tKey string) MutableTrigger {
+	t.key = tKey
 	return t
 }
 
 func (t *trigger) WithFromTime(from time.Time) MutableTrigger {
+	t.fromTime = &from
 	return t
 }
 
 func (t *trigger) WithToTime(to time.Time) MutableTrigger {
+	t.toTime = &to
 	return t
 }
 
 func (t *trigger) WithRepeats(repeats Repeats) MutableTrigger {
+	t.repeats = repeats
 	return t
 }
 
 func (t *trigger) WithCron(spec string) MutableTrigger {
+	t.cronSpec = spec
 	return t
 }
 
 func (t *trigger) InLocation(loc string) MutableTrigger {
+	t.location = loc
 	return t
 }
 
 func (t *trigger) ToImmutable() (ImmutableTrigger, error) {
+	if t.key == "" {
+		return nil, ErrEmptyTriggerKey
+	}
+	if t.cronSpec == "" {
+		return nil, ErrEmptyCronSpec
+	}
+
+	loc, err := time.LoadLocation(t.location)
+	if err != nil {
+		return nil, fmt.Errorf(ErrInvalidLocation, err)
+	}
+	t.loc = loc
+
+	sched, err := cron.Parse(t.cronSpec)
+	if err != nil {
+		return nil, fmt.Errorf(ErrInvalidCronSpec, err)
+	}
+	t.sched = sched
+
+	t.nextTime = t.sched.Next(time.Now().In(t.loc))
+
 	return t, nil
 }
 
@@ -97,7 +143,10 @@ func (t *trigger) NextTriggerTime() time.Time {
 }
 
 func NewTrigger() MutableTrigger {
-	return &trigger{}
+	return &trigger{
+		repeats:  Infinity,
+		location: "Local",
+	}
 }
 
 func Repeat(count int) Repeats {

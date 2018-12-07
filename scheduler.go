@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"errors"
 	"github.com/d1slike/go-sched/store"
 )
 
@@ -15,7 +16,7 @@ type Scheduler interface {
 
 type scheduler struct {
 	name     string
-	store    store.Store
+	store    Store
 	registry executorRegistry
 }
 
@@ -29,6 +30,26 @@ func (s *scheduler) Shutdown() error {
 
 func (s *scheduler) RegisterExecutor(jType string, executor JobExecutor) {
 	s.registry.Register(jType, executor)
+}
+
+func (s *scheduler) ScheduleJob(job MutableJob, tri MutableTrigger) error {
+	j, err := job.ToImmutable()
+	if err != nil {
+		return err
+	}
+
+	t, err := tri.ToImmutable()
+	if err != nil {
+		return err
+	}
+
+	trigger, ok := t.(*trigger)
+	if !ok {
+		return errors.New("unknown trigger type")
+	}
+	trigger.jobKey = j.Key()
+
+	return nil
 }
 
 func NewScheduler(name string, opts ...Option) Scheduler {
@@ -48,7 +69,7 @@ func NewScheduler(name string, opts ...Option) Scheduler {
 	return s
 }
 
-func WithStore(store store.Store) Option {
+func WithStore(store Store) Option {
 	return func(s *scheduler) {
 		s.store = store
 	}

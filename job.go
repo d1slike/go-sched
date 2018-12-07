@@ -1,8 +1,14 @@
 package scheduler
 
 import (
+	"errors"
 	"github.com/d1slike/go-sched/json"
 	"github.com/d1slike/go-sched/log"
+)
+
+var (
+	ErrEmptyJobKey  = errors.New("empty job key")
+	ErrEmptyJobType = errors.New("empty job type")
 )
 
 type MutableJob interface {
@@ -22,6 +28,16 @@ type job struct {
 	key   string
 	jType string
 	data  []byte
+}
+
+func (j *job) ToImmutable() (ImmutableJob, error) {
+	if j.key == "" {
+		return nil, ErrEmptyJobKey
+	}
+	if j.jType == "" {
+		return nil, ErrEmptyJobType
+	}
+	return j, nil
 }
 
 func (j *job) Key() string {

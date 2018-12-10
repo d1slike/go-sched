@@ -10,21 +10,49 @@ type Option func(s *scheduler)
 type Scheduler interface {
 	Start()
 	Shutdown() error
-	RegisterExecutor(jType string, executor JobExecutor)
-	UnregisterExecutor(jType string) bool
+	RegisterExecutor(jType string, executor JobExecutor) Scheduler
+	UnregisterExecutor(jType string)
 	ScheduleJob(job MutableJob, trigger MutableTrigger) error
-	GetJob(jKey string) (ImmutableJob, bool)
-	GetTrigger(tKey string) (ImmutableTrigger, bool)
-	DeleteJob(jKey string) bool
-	DeleteTrigger(tKey string) bool
-	GetJobs() []ImmutableJob
-	GetTriggers() []ImmutableTrigger
+	GetJob(jKey string) (ImmutableJob, error)
+	GetTrigger(tKey string) (ImmutableTrigger, error)
+	DeleteJob(jKey string) (bool, error)
+	DeleteTrigger(tKey string) (bool, error)
+	GetJobs() ([]ImmutableJob, error)
+	GetTriggers() ([]ImmutableTrigger, error)
 }
 
 type scheduler struct {
 	name     string
 	store    Store
 	registry executorRegistry
+}
+
+func (s *scheduler) GetJob(jKey string) (ImmutableJob, error) {
+	return s.store.GetJob(s.name, jKey)
+}
+
+func (s *scheduler) GetTrigger(tKey string) (ImmutableTrigger, error) {
+	return s.store.GetTrigger(s.name, tKey)
+}
+
+func (s *scheduler) DeleteJob(jKey string) (bool, error) {
+	return s.store.DeleteJob(s.name, jKey)
+}
+
+func (s *scheduler) DeleteTrigger(tKey string) (bool, error) {
+	return s.store.DeleteTrigger(s.name, tKey)
+}
+
+func (s *scheduler) GetJobs() ([]ImmutableJob, error) {
+	return s.store.GetJobs(s.name)
+}
+
+func (s *scheduler) GetTriggers() ([]ImmutableTrigger, error) {
+	return s.store.GetTriggers(s.name)
+}
+
+func (s *scheduler) UnregisterExecutor(jType string) {
+	s.registry.Unregister(jType)
 }
 
 func (s *scheduler) Start() {
@@ -56,12 +84,13 @@ func (s *scheduler) ScheduleJob(job MutableJob, tri MutableTrigger) error {
 		return errors.New("unknown trigger type")
 	}
 	trigger.jobKey = j.Key()
+	trigger.state = StateScheduled
 
-	if err := s.store.InsertJob(j); err != nil {
+	if err := s.store.InsertJob(s.name, j); err != nil {
 		return err
 	}
 
-	if err := s.store.InsertTrigger(trigger); err != nil {
+	if err := s.store.InsertTrigger(s.name, trigger); err != nil {
 		return err
 	}
 

@@ -22,7 +22,6 @@ type ImmutableJob interface {
 	Key() string
 	Type() string
 	Data() []byte
-	Scheduler() string
 }
 
 type job struct {
@@ -30,10 +29,6 @@ type job struct {
 	jType     string
 	scheduler string
 	data      []byte
-}
-
-func (j *job) Scheduler() string {
-	return j.scheduler
 }
 
 func (j *job) ToImmutable() (ImmutableJob, error) {

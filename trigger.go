@@ -8,7 +8,13 @@ import (
 )
 
 const (
-	Infinity = Repeats(-1)
+	RepeatInfinity = Repeats(-1)
+)
+
+const (
+	StateScheduled = TriggerState("SCHEDULED")
+	StateAcquired  = TriggerState("ACQUIRED")
+	StateExhausted = TriggerState("EXHAUSTED")
 )
 
 var (
@@ -19,6 +25,8 @@ var (
 )
 
 type Repeats int
+
+type TriggerState string
 
 type MutableTrigger interface {
 	WithKey(tKey string) MutableTrigger
@@ -33,32 +41,33 @@ type MutableTrigger interface {
 type ImmutableTrigger interface {
 	Key() string
 	JobKey() string
-	Scheduler() string
 	FromTime() *time.Time
 	ToTime() *time.Time
 	Repeats() Repeats
 	CronSpec() string
 	Location() *time.Location
+	State() TriggerState
 	NextTriggerTime() time.Time
 }
 
 type trigger struct {
-	key       string
-	jobKey    string
-	scheduler string
-	fromTime  *time.Time
-	toTime    *time.Time
-	repeats   Repeats
-	cronSpec  string
-	location  string
+	key      string
+	jobKey   string
+	fromTime *time.Time
+	toTime   *time.Time
+	repeats  Repeats
+	cronSpec string
+	location string
 
-	loc      *time.Location
-	sched    cron.Schedule
-	nextTime time.Time
+	state         TriggerState
+	loc           *time.Location
+	triggeredTime Repeats
+	sched         cron.Schedule
+	nextTime      time.Time
 }
 
-func (t *trigger) Scheduler() string {
-	return t.scheduler
+func (t *trigger) State() TriggerState {
+	return t.state
 }
 
 func (t *trigger) JobKey() string {
@@ -150,7 +159,7 @@ func (t *trigger) NextTriggerTime() time.Time {
 
 func NewTrigger() MutableTrigger {
 	return &trigger{
-		repeats:  Infinity,
+		repeats:  RepeatInfinity,
 		location: "Local",
 	}
 }

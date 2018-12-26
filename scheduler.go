@@ -1,8 +1,10 @@
 package scheduler
 
 import (
-	"errors"
-	"github.com/d1slike/go-sched/store"
+	"github.com/d1slike/go-sched/internal"
+	"github.com/d1slike/go-sched/jobs"
+	"github.com/d1slike/go-sched/stores"
+	"github.com/d1slike/go-sched/triggers"
 )
 
 type Option func(s *scheduler)
@@ -12,26 +14,28 @@ type Scheduler interface {
 	Shutdown() error
 	RegisterExecutor(jType string, executor JobExecutor) Scheduler
 	UnregisterExecutor(jType string)
-	ScheduleJob(job MutableJob, trigger MutableTrigger) error
-	GetJob(jKey string) (ImmutableJob, error)
-	GetTrigger(tKey string) (ImmutableTrigger, error)
+	ScheduleJob(job jobs.MutableJob, trigger triggers.MutableTrigger) error
+	GetJob(jKey string) (jobs.ImmutableJob, error)
+	GetTrigger(tKey string) (triggers.ImmutableTrigger, error)
 	DeleteJob(jKey string) (bool, error)
 	DeleteTrigger(tKey string) (bool, error)
-	GetJobs() ([]ImmutableJob, error)
-	GetTriggers() ([]ImmutableTrigger, error)
+	GetJobs() ([]jobs.ImmutableJob, error)
+	GetTriggers() ([]triggers.ImmutableTrigger, error)
 }
 
 type scheduler struct {
 	name     string
-	store    Store
+	store    stores.Store
 	registry executorRegistry
+	executor executor
+	timers   Timers
 }
 
-func (s *scheduler) GetJob(jKey string) (ImmutableJob, error) {
+func (s *scheduler) GetJob(jKey string) (jobs.ImmutableJob, error) {
 	return s.store.GetJob(s.name, jKey)
 }
 
-func (s *scheduler) GetTrigger(tKey string) (ImmutableTrigger, error) {
+func (s *scheduler) GetTrigger(tKey string) (triggers.ImmutableTrigger, error) {
 	return s.store.GetTrigger(s.name, tKey)
 }
 
@@ -40,14 +44,21 @@ func (s *scheduler) DeleteJob(jKey string) (bool, error) {
 }
 
 func (s *scheduler) DeleteTrigger(tKey string) (bool, error) {
-	return s.store.DeleteTrigger(s.name, tKey)
+	ok, err := s.store.DeleteTrigger(s.name, tKey)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		s.executor.CancelTrigger(tKey)
+	}
+	return ok, nil
 }
 
-func (s *scheduler) GetJobs() ([]ImmutableJob, error) {
+func (s *scheduler) GetJobs() ([]jobs.ImmutableJob, error) {
 	return s.store.GetJobs(s.name)
 }
 
-func (s *scheduler) GetTriggers() ([]ImmutableTrigger, error) {
+func (s *scheduler) GetTriggers() ([]triggers.ImmutableTrigger, error) {
 	return s.store.GetTriggers(s.name)
 }
 
@@ -56,11 +67,11 @@ func (s *scheduler) UnregisterExecutor(jType string) {
 }
 
 func (s *scheduler) Start() {
-
+	s.executor.Start()
 }
 
 func (s *scheduler) Shutdown() error {
-
+	return s.executor.Shutdown()
 }
 
 func (s *scheduler) RegisterExecutor(jType string, executor JobExecutor) Scheduler {
@@ -68,7 +79,7 @@ func (s *scheduler) RegisterExecutor(jType string, executor JobExecutor) Schedul
 	return s
 }
 
-func (s *scheduler) ScheduleJob(job MutableJob, tri MutableTrigger) error {
+func (s *scheduler) ScheduleJob(job jobs.MutableJob, tri triggers.MutableTrigger) error {
 	j, err := job.ToImmutable()
 	if err != nil {
 		return err
@@ -79,18 +90,16 @@ func (s *scheduler) ScheduleJob(job MutableJob, tri MutableTrigger) error {
 		return err
 	}
 
-	trigger, ok := t.(*trigger)
-	if !ok {
-		return errors.New("unknown trigger type")
-	}
-	trigger.jobKey = j.Key()
-	trigger.state = StateScheduled
+	t = internal.ModifyTrigger(t, func(tr *internal.Trigger) {
+		tr.TJobKey = j.Key()
+		tr.TState = triggers.StateScheduled
+	})
 
 	if err := s.store.InsertJob(s.name, j); err != nil {
 		return err
 	}
 
-	if err := s.store.InsertTrigger(s.name, trigger); err != nil {
+	if err := s.store.InsertTrigger(s.name, t); err != nil {
 		return err
 	}
 
@@ -101,6 +110,7 @@ func NewScheduler(name string, opts ...Option) Scheduler {
 	s := &scheduler{
 		name:     name,
 		registry: newDefaultExecutorRegistry(),
+		timers:   NewDefaultTimers(),
 	}
 
 	for _, o := range opts {
@@ -108,13 +118,20 @@ func NewScheduler(name string, opts ...Option) Scheduler {
 	}
 
 	if s.store == nil {
-		s.store = store.NewInMemoryStore()
+		s.store = stores.NewInMemoryStore()
 	}
+
+	s.executor = newDefaultRuntimeExecutor(
+		s.name,
+		s.store,
+		s.registry,
+		s.timers,
+	)
 
 	return s
 }
 
-func WithStore(store Store) Option {
+func WithStore(store stores.Store) Option {
 	return func(s *scheduler) {
 		s.store = store
 	}
@@ -123,5 +140,11 @@ func WithStore(store Store) Option {
 func WithExecutors(m map[string]JobExecutor) Option {
 	return func(s *scheduler) {
 		s.registry.RegisterAll(m)
+	}
+}
+
+func WithTimers(timers Timers) Option {
+	return func(s *scheduler) {
+		s.timers = SetDefault(timers)
 	}
 }

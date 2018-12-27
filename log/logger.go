@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	logLevel Level
+	logLevel = LevelWarn
 	logger   = NewStdErrLogger("go-sched")
 )
 
@@ -30,13 +30,13 @@ type stdErrLogger struct {
 
 func (l *stdErrLogger) Log(level Level, entry interface{}) {
 	if logLevel <= level {
-		l.logger.Panicln(entry)
+		l.logger.Println(entry)
 	}
 }
 
 func (l *stdErrLogger) Logf(level Level, format string, args ...interface{}) {
 	if logLevel <= level {
-		l.logger.Panicf(format, args...)
+		l.logger.Printf(format, args...)
 	}
 }
 

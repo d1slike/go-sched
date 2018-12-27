@@ -16,6 +16,26 @@ type inMemoryStore struct {
 	jMap map[string]jobs.ImmutableJob
 }
 
+func (s *inMemoryStore) DeleteTriggersByJobKey(sName string, jKey string) ([]string, error) {
+	s.tLock.Lock()
+	defer s.tLock.Unlock()
+
+	arr := make([]string, 0)
+	newMap := make(map[string]triggers.ImmutableTrigger, len(s.tMap))
+	for key, trigger := range s.tMap {
+		isOwner := strings.HasPrefix(key, sName)
+		if (isOwner && trigger.JobKey() != jKey) || !isOwner {
+			newMap[key] = trigger
+		} else if isOwner {
+			arr = append(arr, trigger.Key())
+		}
+	}
+
+	s.tMap = newMap
+
+	return arr, nil
+}
+
 func (s *inMemoryStore) InsertJob(sName string, job jobs.ImmutableJob) error {
 	s.jLock.Lock()
 	defer s.jLock.Unlock()
@@ -122,7 +142,7 @@ func (s *inMemoryStore) AcquireTriggers(sName string) ([]triggers.ImmutableTrigg
 	for key, trigger := range s.tMap {
 		if strings.HasPrefix(key, sName) && trigger.State() == triggers.StateScheduled {
 			trigger = internal.ModifyTrigger(trigger, func(tr *internal.Trigger) {
-				tr.TState = triggers.StateAcquired
+				tr.Tstate = triggers.StateAcquired
 			})
 			s.tMap[key] = trigger
 			arr = append(arr, trigger)

@@ -20,6 +20,7 @@ type Store interface {
 	GetTrigger(sName string, tKey string) (triggers.ImmutableTrigger, error)
 	DeleteJob(sName string, jKey string) (bool, error)
 	DeleteTrigger(sName string, tKey string) (bool, error)
+	DeleteTriggersByJobKey(sName string, jKey string) ([]string, error)
 	GetJobs(sName string) ([]jobs.ImmutableJob, error)
 	GetTriggers(sName string) ([]triggers.ImmutableTrigger, error)
 	AcquireTriggers(sName string) ([]triggers.ImmutableTrigger, error)

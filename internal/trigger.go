@@ -2,88 +2,111 @@ package internal
 
 import (
 	"fmt"
+	"github.com/d1slike/go-sched/log"
 	"github.com/d1slike/go-sched/triggers"
 	"github.com/robfig/cron"
 	"time"
 )
 
 type Trigger struct {
-	TKey      string
-	TJobKey   string
-	TFromTime *time.Time
-	TToTime   *time.Time
-	TRepeats  triggers.Repeats
-	TCronSpec string
-	TLocation string
+	Tkey      string
+	TjobKey   string
+	TfromTime *time.Time
+	TtoTime   *time.Time
+	Trepeats  triggers.Repeats
+	TcronSpec string
+	Tlocation string
+	Tdata     []byte
 
-	TState         triggers.TriggerState
-	TLoc           *time.Location
-	TTriggeredTime triggers.Repeats
-	TSched         cron.Schedule
-	TNextTime      time.Time
+	Tstate         triggers.TriggerState
+	Tloc           *time.Location
+	TtriggeredTime triggers.Repeats
+	Tsched         cron.Schedule
+	TnextTime      time.Time
+}
+
+func (t *Trigger) Data() []byte {
+	return t.Tdata
+}
+
+func (t *Trigger) TriggeredTimes() triggers.Repeats {
+	return t.TtriggeredTime
 }
 
 func (t *Trigger) State() triggers.TriggerState {
-	return t.TState
+	return t.Tstate
 }
 
 func (t *Trigger) JobKey() string {
-	return t.TKey
+	return t.Tkey
 }
 
 func (t *Trigger) WithKey(tKey string) triggers.MutableTrigger {
-	t.TKey = tKey
+	t.Tkey = tKey
 	return t
 }
 
 func (t *Trigger) WithFromTime(from time.Time) triggers.MutableTrigger {
-	t.TFromTime = &from
+	t.TfromTime = &from
 	return t
 }
 
 func (t *Trigger) WithToTime(to time.Time) triggers.MutableTrigger {
-	t.TToTime = &to
+	t.TtoTime = &to
 	return t
 }
 
 func (t *Trigger) WithRepeats(repeats triggers.Repeats) triggers.MutableTrigger {
-	t.TRepeats = repeats
+	t.Trepeats = repeats
 	return t
 }
 
 func (t *Trigger) WithCron(spec string) triggers.MutableTrigger {
-	t.TCronSpec = spec
+	t.TcronSpec = spec
+	return t
+}
+
+func (t *Trigger) WithData(data interface{}) triggers.MutableTrigger {
+	if b, err := castData(data); err != nil {
+		log.Errorf("trigger key: %v", t.Tkey, err)
+	} else {
+		t.Tdata = b
+	}
 	return t
 }
 
 func (t *Trigger) InLocation(loc string) triggers.MutableTrigger {
-	t.TLocation = loc
+	t.Tlocation = loc
 	return t
 }
 
 func (t *Trigger) ToImmutable() (triggers.ImmutableTrigger, error) {
-	if t.TKey == "" {
+	if t.Tkey == "" {
 		return nil, triggers.ErrEmptyTriggerKey
 	}
-	if t.TCronSpec == "" {
+	if t.TcronSpec == "" {
 		return nil, triggers.ErrEmptyCronSpec
 	}
 
-	loc, err := time.LoadLocation(t.TLocation)
+	loc, err := time.LoadLocation(t.Tlocation)
 	if err != nil {
 		return nil, fmt.Errorf(triggers.ErrInvalidLocation, err)
 	}
-	t.TLoc = loc
+	t.Tloc = loc
 
-	sched, err := cron.Parse(t.TCronSpec)
+	sched, err := cron.Parse(t.TcronSpec)
 	if err != nil {
 		return nil, fmt.Errorf(triggers.ErrInvalidCronSpec, err)
 	}
-	t.TSched = sched
+	t.Tsched = sched
 
-	t.TNextTime = t.TSched.Next(time.Now().In(t.TLoc))
+	if t.TfromTime != nil {
+		t.TnextTime = t.Tsched.Next(t.TfromTime.In(t.Tloc))
+	} else {
+		t.TnextTime = t.Tsched.Next(time.Now().In(t.Tloc))
+	}
 
-	if t.TNextTime.IsZero() {
+	if t.TnextTime.IsZero() || (t.TtoTime != nil && t.TtoTime.Before(t.TnextTime)) {
 		return nil, triggers.ErrAlreadyExhausted
 	}
 
@@ -91,31 +114,31 @@ func (t *Trigger) ToImmutable() (triggers.ImmutableTrigger, error) {
 }
 
 func (t *Trigger) Key() string {
-	return t.TKey
+	return t.Tkey
 }
 
 func (t *Trigger) FromTime() *time.Time {
-	return t.TFromTime
+	return t.TfromTime
 }
 
 func (t *Trigger) ToTime() *time.Time {
-	return t.TToTime
+	return t.TtoTime
 }
 
 func (t *Trigger) Repeats() triggers.Repeats {
-	return t.TRepeats
+	return t.Trepeats
 }
 
 func (t *Trigger) CronSpec() string {
-	return t.TCronSpec
+	return t.TcronSpec
 }
 
 func (t *Trigger) Location() *time.Location {
-	return t.TLoc
+	return t.Tloc
 }
 
 func (t *Trigger) NextTriggerTime() time.Time {
-	return t.TNextTime
+	return t.TnextTime
 }
 
 func ModifyTrigger(t triggers.ImmutableTrigger, f func(tr *Trigger)) triggers.ImmutableTrigger {
@@ -127,7 +150,7 @@ func ModifyTrigger(t triggers.ImmutableTrigger, f func(tr *Trigger)) triggers.Im
 
 func NewTrigger() *Trigger {
 	return &Trigger{
-		TRepeats:  triggers.RepeatInfinity,
-		TLocation: "Local",
+		Trepeats:  triggers.RepeatInfinity,
+		Tlocation: "Local",
 	}
 }

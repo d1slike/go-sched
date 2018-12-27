@@ -7,6 +7,7 @@ import (
 
 const (
 	RepeatInfinity = Repeats(-1)
+	RepeatOnce     = Repeats(1)
 )
 
 const (
@@ -33,6 +34,7 @@ type MutableTrigger interface {
 	WithToTime(to time.Time) MutableTrigger
 	WithRepeats(repeats Repeats) MutableTrigger
 	WithCron(spec string) MutableTrigger
+	WithData(value interface{}) MutableTrigger
 	InLocation(loc string) MutableTrigger
 	ToImmutable() (ImmutableTrigger, error)
 }
@@ -40,12 +42,14 @@ type MutableTrigger interface {
 type ImmutableTrigger interface {
 	Key() string
 	JobKey() string
+	Data() []byte
 	FromTime() *time.Time
 	ToTime() *time.Time
 	Repeats() Repeats
 	CronSpec() string
 	Location() *time.Location
 	State() TriggerState
+	TriggeredTimes() Repeats
 	NextTriggerTime() time.Time
 }
 

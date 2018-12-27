@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"github.com/d1slike/go-sched/internal"
 	"github.com/d1slike/go-sched/jobs"
 	"github.com/d1slike/go-sched/stores"
@@ -11,7 +12,7 @@ type Option func(s *scheduler)
 
 type Scheduler interface {
 	Start()
-	Shutdown() error
+	Shutdown(ctx context.Context) error
 	RegisterExecutor(jType string, executor JobExecutor) Scheduler
 	UnregisterExecutor(jType string)
 	ScheduleJob(job jobs.MutableJob, trigger triggers.MutableTrigger) error
@@ -21,6 +22,7 @@ type Scheduler interface {
 	DeleteTrigger(tKey string) (bool, error)
 	GetJobs() ([]jobs.ImmutableJob, error)
 	GetTriggers() ([]triggers.ImmutableTrigger, error)
+	UpdateJob(job jobs.MutableJob) error
 }
 
 type scheduler struct {
@@ -40,7 +42,19 @@ func (s *scheduler) GetTrigger(tKey string) (triggers.ImmutableTrigger, error) {
 }
 
 func (s *scheduler) DeleteJob(jKey string) (bool, error) {
-	return s.store.DeleteJob(s.name, jKey)
+	ok, err := s.store.DeleteJob(s.name, jKey)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		keys, err := s.store.DeleteTriggersByJobKey(s.name, jKey)
+		if err != nil {
+			return false, err
+		}
+		s.executor.CancelTriggers(keys...)
+	}
+
+	return ok, nil
 }
 
 func (s *scheduler) DeleteTrigger(tKey string) (bool, error) {
@@ -49,7 +63,7 @@ func (s *scheduler) DeleteTrigger(tKey string) (bool, error) {
 		return false, err
 	}
 	if ok {
-		s.executor.CancelTrigger(tKey)
+		s.executor.CancelTriggers(tKey)
 	}
 	return ok, nil
 }
@@ -70,8 +84,8 @@ func (s *scheduler) Start() {
 	s.executor.Start()
 }
 
-func (s *scheduler) Shutdown() error {
-	return s.executor.Shutdown()
+func (s *scheduler) Shutdown(ctx context.Context) error {
+	return s.executor.Shutdown(ctx)
 }
 
 func (s *scheduler) RegisterExecutor(jType string, executor JobExecutor) Scheduler {
@@ -91,8 +105,8 @@ func (s *scheduler) ScheduleJob(job jobs.MutableJob, tri triggers.MutableTrigger
 	}
 
 	t = internal.ModifyTrigger(t, func(tr *internal.Trigger) {
-		tr.TJobKey = j.Key()
-		tr.TState = triggers.StateScheduled
+		tr.TjobKey = j.Key()
+		tr.Tstate = triggers.StateScheduled
 	})
 
 	if err := s.store.InsertJob(s.name, j); err != nil {
@@ -104,6 +118,15 @@ func (s *scheduler) ScheduleJob(job jobs.MutableJob, tri triggers.MutableTrigger
 	}
 
 	return nil
+}
+
+func (s *scheduler) UpdateJob(job jobs.MutableJob) error {
+	j, err := job.ToImmutable()
+	if err != nil {
+		return err
+	}
+
+	return s.store.UpdateJob(s.name, j)
 }
 
 func NewScheduler(name string, opts ...Option) Scheduler {

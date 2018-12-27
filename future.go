@@ -21,3 +21,11 @@ func (f *future) Cancel() {
 func (f *future) IsRunning() bool {
 	return f.running.Get()
 }
+
+func (f *future) IsCanceled() bool {
+	return f.canceled.Get()
+}
+
+func (f *future) Run() {
+	f.running.Set(true)
+}

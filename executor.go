@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"github.com/d1slike/go-sched/internal"
 	"github.com/d1slike/go-sched/log"
 	"github.com/d1slike/go-sched/stores"
@@ -9,6 +11,14 @@ import (
 	"github.com/d1slike/go-sched/utils"
 	"sync"
 	"time"
+)
+
+const (
+	defaultDelta = 10 * time.Second
+)
+
+var (
+	ErrJobDeadlineExceeded = errors.New("job execution deadline exceeded")
 )
 
 type executor interface {
@@ -72,14 +82,14 @@ func (e *defaultRuntimeExecutor) Shutdown(ctx context.Context) error {
 	e.lock.Unlock()
 
 	//await all running triggers
-	awaitRun := make(chan struct{}, 1)
+	awaitRunning := make(chan struct{}, 1)
 	go func() {
 		e.runningFutures.Wait()
-		awaitRun <- struct{}{}
+		awaitRunning <- struct{}{}
 	}()
 	select {
 	case <-ctx.Done():
-	case <-awaitRun:
+	case <-awaitRunning:
 
 	}
 
@@ -127,9 +137,7 @@ func (e *defaultRuntimeExecutor) makeFuture(t triggers.ImmutableTrigger) *future
 		running:  utils.NewAtomicBool(false),
 		canceled: utils.NewAtomicBool(false),
 	}
-	f := func() {
-
-	}
+	f := e.makeF(future)
 
 	var dur time.Duration
 	now := time.Now().In(t.Location())
@@ -144,6 +152,102 @@ func (e *defaultRuntimeExecutor) makeFuture(t triggers.ImmutableTrigger) *future
 	return future
 }
 
+func (e *defaultRuntimeExecutor) makeF(f *future) func() {
+	return func() {
+		if f.IsCanceled() {
+			return
+		}
+
+		f.Run()
+		e.runningFutures.Add(1)
+		defer func() {
+			e.lock.Lock()
+			delete(e.fMap, f.t.Key())
+			e.lock.Unlock()
+
+			f.running.Set(false)
+
+			e.runningFutures.Done()
+		}()
+
+		trigger, err := e.store.GetTrigger(e.sName, f.t.Key())
+		if err != nil {
+			log.Errorf("defaultRuntimeExecutor: could not get trigger %v: %v", f.t.Key(), err)
+			return
+		}
+		if trigger == nil {
+			log.Warnf("defaultRuntimeExecutor: trigger %v was deleted", f.t.Key())
+			return
+		}
+		now := time.Now().In(trigger.Location())
+		if !internal.IsNear(now, trigger.NextTriggerTime(), defaultDelta) {
+			log.Warnf("defaultRuntimeExecutor: trigger %v was updated. now: %s, next trigger time: %s", f.t.Key(), now, trigger.NextTriggerTime())
+			return
+		}
+
+		job, err := e.store.GetJob(e.sName, trigger.JobKey())
+		if err != nil {
+			log.Errorf("defaultRuntimeExecutor: could not get job %v: %v", trigger.JobKey(), err)
+			return
+		}
+		if job == nil {
+			log.Warnf("defaultRuntimeExecutor: job %v was deleted", trigger.JobKey())
+			return
+		}
+
+		exec, ok := e.registry.GetExecutor(job.Type())
+		if !ok {
+			log.Errorf("defaultRuntimeExecutor: not found executor for job type: %v", job.Type())
+			return
+		}
+
+		ctx := &jobCtx{
+			job:     job,
+			trigger: trigger,
+		}
+		doneChan := make(chan error, 1)
+		timeout := make(chan time.Time) //todo add timeout
+		go func() {
+			defer func() {
+				if err := recover(); err != nil {
+					doneChan <- fmt.Errorf("%v", err)
+				}
+			}()
+			doneChan <- exec(ctx)
+		}()
+
+		select {
+		case <-timeout:
+			err = ErrJobDeadlineExceeded
+		case e := <-doneChan:
+			err = e
+		}
+
+		if err != nil {
+			log.Warnf("defaultRuntimeExecutor: job %v has finished with err '%v' by trigger %v", job.Key(), err, trigger.Key())
+		}
+
+		trigger = internal.ModifyTrigger(trigger, func(tr *internal.Trigger) {
+			tr.TtriggeredTime++
+			if tr.Trepeats != triggers.RepeatInfinity && tr.TtriggeredTime >= tr.Trepeats {
+				tr.Tstate = triggers.StateExhausted
+				return
+			}
+
+			nextTime := internal.CalcNextTriggerTime(tr)
+			if nextTime.IsZero() {
+				tr.Tstate = triggers.StateExhausted
+			} else {
+				tr.Tstate = triggers.StateScheduled
+				tr.TnextTime = nextTime
+			}
+		})
+		if err := e.store.UpdateTrigger(e.sName, trigger); err != nil {
+			log.Errorf("defaultRuntimeExecutor: could not update trigger %v: %v", trigger.Key(), err)
+		}
+	}
+}
+
 func newDefaultRuntimeExecutor(
 	sName string,
 	store stores.Store,
@@ -156,5 +260,6 @@ func newDefaultRuntimeExecutor(
 		registry:  registry,
 		timers:    timers,
 		closeChan: make(chan struct{}),
+		fMap:      make(map[string]*future),
 	}
 }

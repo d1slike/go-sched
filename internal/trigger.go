@@ -100,14 +100,11 @@ func (t *Trigger) ToImmutable() (triggers.ImmutableTrigger, error) {
 	}
 	t.Tsched = sched
 
-	if t.TfromTime != nil {
-		t.TnextTime = t.Tsched.Next(t.TfromTime.In(t.Tloc))
-	} else {
-		t.TnextTime = t.Tsched.Next(time.Now().In(t.Tloc))
-	}
-
-	if t.TnextTime.IsZero() || (t.TtoTime != nil && t.TtoTime.Before(t.TnextTime)) {
+	nextTime := CalcNextTriggerTime(t)
+	if nextTime.IsZero() {
 		return nil, triggers.ErrAlreadyExhausted
+	} else {
+		t.TnextTime = nextTime
 	}
 
 	return t, nil
@@ -143,7 +140,9 @@ func (t *Trigger) NextTriggerTime() time.Time {
 
 func ModifyTrigger(t triggers.ImmutableTrigger, f func(tr *Trigger)) triggers.ImmutableTrigger {
 	if trigger, ok := t.(*Trigger); ok {
-		f(trigger)
+		cpy := *trigger
+		f(&cpy)
+		return &cpy
 	}
 	return t
 }
@@ -153,4 +152,33 @@ func NewTrigger() *Trigger {
 		Trepeats:  triggers.RepeatInfinity,
 		Tlocation: "Local",
 	}
+}
+
+// calc next trigger time considering fromTime, toTime boundary
+// return zero time if never fire
+func CalcNextTriggerTime(t *Trigger) time.Time {
+	var nextTime time.Time
+	if t.TfromTime != nil {
+		nextTime = t.Tsched.Next(t.TfromTime.In(t.Tloc))
+	} else {
+		nextTime = t.Tsched.Next(time.Now().In(t.Tloc))
+	}
+
+	if t.TnextTime.IsZero() || (t.TtoTime != nil && t.TtoTime.Before(t.TnextTime)) {
+		return time.Time{}
+	}
+
+	return nextTime
+}
+
+func IsNear(a, b time.Time, delta time.Duration) bool {
+	if a.Equal(b) {
+		return true
+	}
+
+	if a.After(b) {
+		return a.Sub(b) <= delta
+	}
+
+	return b.Sub(a) <= delta
 }

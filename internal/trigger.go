@@ -38,7 +38,7 @@ func (t *Trigger) State() triggers.TriggerState {
 }
 
 func (t *Trigger) JobKey() string {
-	return t.Tkey
+	return t.TjobKey
 }
 
 func (t *Trigger) WithKey(tKey string) triggers.MutableTrigger {
@@ -164,7 +164,7 @@ func CalcNextTriggerTime(t *Trigger) time.Time {
 		nextTime = t.Tsched.Next(time.Now().In(t.Tloc))
 	}
 
-	if t.TnextTime.IsZero() || (t.TtoTime != nil && t.TtoTime.Before(t.TnextTime)) {
+	if nextTime.IsZero() || (t.TtoTime != nil && t.TtoTime.Before(nextTime)) {
 		return time.Time{}
 	}
 

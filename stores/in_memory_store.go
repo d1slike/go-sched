@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"fmt"
 	"github.com/d1slike/go-sched/internal"
 	"github.com/d1slike/go-sched/jobs"
 	"github.com/d1slike/go-sched/triggers"
@@ -23,7 +24,8 @@ func (s *inMemoryStore) DeleteTriggersByJobKey(sName string, jKey string) ([]str
 	arr := make([]string, 0)
 	newMap := make(map[string]triggers.ImmutableTrigger, len(s.tMap))
 	for key, trigger := range s.tMap {
-		isOwner := strings.HasPrefix(key, sName)
+		scheduler, _ := splitStoreKey(key)
+		isOwner := scheduler == sName
 		if (isOwner && trigger.JobKey() != jKey) || !isOwner {
 			newMap[key] = trigger
 		} else if isOwner {
@@ -40,11 +42,11 @@ func (s *inMemoryStore) InsertJob(sName string, job jobs.ImmutableJob) error {
 	s.jLock.Lock()
 	defer s.jLock.Unlock()
 
-	if _, exists := s.jMap[key(sName, job.Key())]; exists {
+	if _, exists := s.jMap[storeKey(sName, job.Key())]; exists {
 		return ErrJobAlreadyExists
 	}
 
-	s.jMap[key(sName, job.Key())] = job
+	s.jMap[storeKey(sName, job.Key())] = job
 
 	return nil
 }
@@ -53,11 +55,11 @@ func (s *inMemoryStore) InsertTrigger(sName string, trigger triggers.ImmutableTr
 	s.tLock.Lock()
 	defer s.tLock.Unlock()
 
-	if _, exists := s.tMap[key(sName, trigger.Key())]; exists {
+	if _, exists := s.tMap[storeKey(sName, trigger.Key())]; exists {
 		return ErrTriggerAlreadyExists
 	}
 
-	s.tMap[key(sName, trigger.Key())] = trigger
+	s.tMap[storeKey(sName, trigger.Key())] = trigger
 
 	return nil
 }
@@ -66,7 +68,7 @@ func (s *inMemoryStore) GetJob(sName string, jKey string) (jobs.ImmutableJob, er
 	s.jLock.RLock()
 	defer s.jLock.RUnlock()
 
-	j, ok := s.jMap[key(sName, jKey)]
+	j, ok := s.jMap[storeKey(sName, jKey)]
 	if !ok {
 		return nil, nil
 	}
@@ -78,7 +80,7 @@ func (s *inMemoryStore) GetTrigger(sName string, tKey string) (triggers.Immutabl
 	s.tLock.RLock()
 	defer s.tLock.RUnlock()
 
-	t, ok := s.tMap[key(sName, tKey)]
+	t, ok := s.tMap[storeKey(sName, tKey)]
 	if !ok {
 		return nil, nil
 	}
@@ -90,8 +92,8 @@ func (s *inMemoryStore) DeleteJob(sName string, jKey string) (bool, error) {
 	s.jLock.Lock()
 	defer s.jLock.Unlock()
 
-	_, ok := s.jMap[key(sName, jKey)]
-	delete(s.jMap, key(sName, jKey))
+	_, ok := s.jMap[storeKey(sName, jKey)]
+	delete(s.jMap, storeKey(sName, jKey))
 
 	return ok, nil
 }
@@ -100,8 +102,8 @@ func (s *inMemoryStore) DeleteTrigger(sName string, tKey string) (bool, error) {
 	s.tLock.Lock()
 	defer s.tLock.Unlock()
 
-	_, ok := s.tMap[key(sName, tKey)]
-	delete(s.tMap, key(sName, tKey))
+	_, ok := s.tMap[storeKey(sName, tKey)]
+	delete(s.tMap, storeKey(sName, tKey))
 
 	return ok, nil
 }
@@ -112,7 +114,9 @@ func (s *inMemoryStore) GetJobs(sName string) ([]jobs.ImmutableJob, error) {
 
 	arr := make([]jobs.ImmutableJob, 0, len(s.jMap))
 	for key, job := range s.jMap {
-		if strings.HasPrefix(key, sName) {
+		scheduler, _ := splitStoreKey(key)
+		isOwner := scheduler == sName
+		if isOwner {
 			arr = append(arr, job)
 		}
 	}
@@ -126,7 +130,9 @@ func (s *inMemoryStore) GetTriggers(sName string) ([]triggers.ImmutableTrigger, 
 
 	arr := make([]triggers.ImmutableTrigger, 0, len(s.jMap))
 	for key, trigger := range s.tMap {
-		if strings.HasPrefix(key, sName) {
+		scheduler, _ := splitStoreKey(key)
+		isOwner := scheduler == sName
+		if isOwner {
 			arr = append(arr, trigger)
 		}
 	}
@@ -140,7 +146,9 @@ func (s *inMemoryStore) AcquireTriggers(sName string) ([]triggers.ImmutableTrigg
 
 	arr := make([]triggers.ImmutableTrigger, 0, len(s.jMap)/2)
 	for key, trigger := range s.tMap {
-		if strings.HasPrefix(key, sName) && trigger.State() == triggers.StateScheduled {
+		scheduler, _ := splitStoreKey(key)
+		isOwner := scheduler == sName
+		if isOwner && trigger.State() == triggers.StateScheduled {
 			trigger = internal.ModifyTrigger(trigger, func(tr *internal.Trigger) {
 				tr.Tstate = triggers.StateAcquired
 			})
@@ -156,12 +164,12 @@ func (s *inMemoryStore) UpdateTrigger(sName string, trigger triggers.ImmutableTr
 	s.tLock.Lock()
 	defer s.tLock.Unlock()
 
-	_, ok := s.tMap[key(sName, trigger.Key())]
+	_, ok := s.tMap[storeKey(sName, trigger.Key())]
 	if !ok {
 		return ErrTriggerNotFound
 	}
 
-	s.tMap[key(sName, trigger.Key())] = trigger
+	s.tMap[storeKey(sName, trigger.Key())] = trigger
 
 	return nil
 }
@@ -170,12 +178,12 @@ func (s *inMemoryStore) UpdateJob(sName string, job jobs.ImmutableJob) error {
 	s.jLock.Lock()
 	defer s.jLock.Unlock()
 
-	_, ok := s.jMap[key(sName, job.Key())]
+	_, ok := s.jMap[storeKey(sName, job.Key())]
 	if !ok {
 		return ErrJobNotFound
 	}
 
-	s.jMap[key(sName, job.Key())] = job
+	s.jMap[storeKey(sName, job.Key())] = job
 
 	return nil
 }
@@ -187,7 +195,8 @@ func (s *inMemoryStore) DeleteExhaustedTriggers(sName string) (int, error) {
 	deleted := 0
 	newMap := make(map[string]triggers.ImmutableTrigger, len(s.tMap))
 	for key, trigger := range s.tMap {
-		isOwner := strings.HasPrefix(key, sName)
+		scheduler, _ := splitStoreKey(key)
+		isOwner := scheduler == sName
 		if (isOwner && trigger.State() != triggers.StateExhausted) || !isOwner {
 			newMap[key] = trigger
 		} else if isOwner {
@@ -207,6 +216,11 @@ func NewInMemoryStore() Store {
 	}
 }
 
-func key(sName, entityKey string) string {
-	return sName + entityKey
+func storeKey(sName, entityKey string) string {
+	return fmt.Sprintf("%s_%s", sName, entityKey)
+}
+
+func splitStoreKey(key string) (sName string, entityKey string) {
+	parts := strings.SplitN(key, "_", 2)
+	return parts[0], parts[1]
 }

@@ -95,9 +95,9 @@ func (e *defaultRuntimeExecutor) Shutdown(ctx context.Context) error {
 
 	//release remaining triggers
 	e.lock.Lock()
-	for key, f := range e.fMap {
+	/*for key, f := range e.fMap {
 
-	}
+	}*/
 	e.lock.Unlock()
 
 	return nil
@@ -242,6 +242,7 @@ func (e *defaultRuntimeExecutor) makeF(f *future) func() {
 				tr.TnextTime = nextTime
 			}
 		})
+
 		if err := e.store.UpdateTrigger(e.sName, trigger); err != nil {
 			log.Errorf("defaultRuntimeExecutor: could not update trigger %v: %v", trigger.Key(), err)
 		}
